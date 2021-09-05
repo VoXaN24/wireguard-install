@@ -178,7 +178,7 @@ ListenPort = ${SERVER_PORT}
 PrivateKey = ${SERVER_PRIV_KEY}" >"/etc/wireguard/${SERVER_WG_NIC}.conf"
 
 	# Add firewall rule for Ubuntu 20.04 (others?)
-	# iptables -I INPUT 2 -p udp -m udp --dport ${SERVER_PORT} -j ACCEPT
+	 iptables -I INPUT 2 -p udp -m udp --dport ${SERVER_PORT} -j ACCEPT
 	if pgrep firewalld; then
 		FIREWALLD_IPV4_ADDRESS=$(echo "${SERVER_WG_IPV4}" | cut -d"." -f1-3)".0"
 		FIREWALLD_IPV6_ADDRESS=$(echo "${SERVER_WG_IPV6}" | sed 's/:[^:]*$/:0/')
