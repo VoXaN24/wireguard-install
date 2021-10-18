@@ -111,17 +111,14 @@ function installQuestions() {
 			CLIENT_DNS_2="${CLIENT_DNS_1}"
 		fi
 	done
-
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your WireGuard server now."
 	echo "You will be able to generate a client at the end of the installation."
 	read -n1 -r -p "Press any key to continue..."
 }
-
 function installWireGuard() {
 	# Run setup questions first
 	installQuestions
-
 	# Install WireGuard tools and module
 	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
 		apt-get update
@@ -150,15 +147,11 @@ function installWireGuard() {
 	elif [[ ${OS} == 'arch' ]]; then
 		pacman -S --needed --noconfirm wireguard-tools qrencode
 	fi
-
 	# Make sure the directory exists (this does not seem the be the case on fedora)
 	mkdir /etc/wireguard >/dev/null 2>&1
-
 	chmod 600 -R /etc/wireguard/
-
 	SERVER_PRIV_KEY=$(wg genkey)
 	SERVER_PUB_KEY=$(echo "${SERVER_PRIV_KEY}" | wg pubkey)
-
 	# Save WireGuard settings
 	echo "SERVER_PUB_IP=${SERVER_PUB_IP}
 SERVER_PUB_NIC=${SERVER_PUB_NIC}
@@ -170,39 +163,33 @@ SERVER_PRIV_KEY=${SERVER_PRIV_KEY}
 SERVER_PUB_KEY=${SERVER_PUB_KEY}
 CLIENT_DNS_1=${CLIENT_DNS_1}
 CLIENT_DNS_2=${CLIENT_DNS_2}" >/etc/wireguard/params
-
 	# Add server interface
 	echo "[Interface]
 Address = ${SERVER_WG_IPV4}/24,${SERVER_WG_IPV6}/64
 ListenPort = ${SERVER_PORT}
 PrivateKey = ${SERVER_PRIV_KEY}" >"/etc/wireguard/${SERVER_WG_NIC}.conf"
-
+	# Add firewall rule for Ubuntu 20.04 (others?)
+	# iptables -I INPUT 2 -p udp -m udp --dport ${SERVER_PORT} -j ACCEPT
 	if pgrep firewalld; then
 		FIREWALLD_IPV4_ADDRESS=$(echo "${SERVER_WG_IPV4}" | cut -d"." -f1-3)".0"
 		FIREWALLD_IPV6_ADDRESS=$(echo "${SERVER_WG_IPV6}" | sed 's/:[^:]*$/:0/')
 		echo "PostUp = firewall-cmd --add-port ${SERVER_PORT}/udp && firewall-cmd --add-rich-rule='rule family=ipv4 source address=${FIREWALLD_IPV4_ADDRESS}/24 masquerade' && firewall-cmd --add-rich-rule='rule family=ipv6 source address=${FIREWALLD_IPV6_ADDRESS}/24 masquerade'
 PostDown = firewall-cmd --remove-port ${SERVER_PORT}/udp && firewall-cmd --remove-rich-rule='rule family=ipv4 source address=${FIREWALLD_IPV4_ADDRESS}/24 masquerade' && firewall-cmd --remove-rich-rule='rule family=ipv6 source address=${FIREWALLD_IPV6_ADDRESS}/24 masquerade'" >>"/etc/wireguard/${SERVER_WG_NIC}.conf"
 	else
-		echo "PostUp = iptables -A FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT; iptables -A FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; iptables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE; ip6tables -A FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; ip6tables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
+		echo "PostUp = iptables -I FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT; iptables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; iptables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE; ip6tables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; ip6tables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
 PostDown = iptables -D FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT; iptables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; iptables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE; ip6tables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT; ip6tables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE" >>"/etc/wireguard/${SERVER_WG_NIC}.conf"
 	fi
-
 	# Enable routing on the server
 	echo "net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
-
 	sysctl --system
-
 	systemctl start "wg-quick@${SERVER_WG_NIC}"
 	systemctl enable "wg-quick@${SERVER_WG_NIC}"
-
 	newClient
 	echo "If you want to add more clients, you simply need to run this script another time!"
-
 	# Check if WireGuard is running
 	systemctl is-active --quiet "wg-quick@${SERVER_WG_NIC}"
 	WG_RUNNING=$?
-
 	# WireGuard might not work if we updated the kernel. Tell the user to reboot
 	if [[ ${WG_RUNNING} -ne 0 ]]; then
 		echo -e "\n${RED}WARNING: WireGuard does not seem to be running.${NC}"
@@ -210,69 +197,57 @@ net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
 		echo -e "${ORANGE}If you get something like \"Cannot find device ${SERVER_WG_NIC}\", please reboot!${NC}"
 	fi
 }
-
 function newClient() {
 	ENDPOINT="${SERVER_PUB_IP}:${SERVER_PORT}"
-
 	echo ""
 	echo "Tell me a name for the client."
 	echo "The name must consist of alphanumeric character. It may also include an underscore or a dash and can't exceed 15 chars."
-
 	until [[ ${CLIENT_NAME} =~ ^[a-zA-Z0-9_-]+$ && ${CLIENT_EXISTS} == '0' && ${#CLIENT_NAME} -lt 16 ]]; do
 		read -rp "Client name: " -e CLIENT_NAME
 		CLIENT_EXISTS=$(grep -c -E "^### Client ${CLIENT_NAME}\$" "/etc/wireguard/${SERVER_WG_NIC}.conf")
-
 		if [[ ${CLIENT_EXISTS} == '1' ]]; then
 			echo ""
 			echo "A client with the specified name was already created, please choose another name."
 			echo ""
 		fi
 	done
-
 	for DOT_IP in {2..254}; do
 		DOT_EXISTS=$(grep -c "${SERVER_WG_IPV4::-1}${DOT_IP}" "/etc/wireguard/${SERVER_WG_NIC}.conf")
 		if [[ ${DOT_EXISTS} == '0' ]]; then
 			break
 		fi
 	done
-
 	if [[ ${DOT_EXISTS} == '1' ]]; then
 		echo ""
 		echo "The subnet configured supports only 253 clients."
 		exit 1
 	fi
-
 	BASE_IP=$(echo "$SERVER_WG_IPV4" | awk -F '.' '{ print $1"."$2"."$3 }')
 	until [[ ${IPV4_EXISTS} == '0' ]]; do
 		read -rp "Client's WireGuard IPv4: ${BASE_IP}." -e -i "${DOT_IP}" DOT_IP
 		CLIENT_WG_IPV4="${BASE_IP}.${DOT_IP}"
 		IPV4_EXISTS=$(grep -c "$CLIENT_WG_IPV4/24" "/etc/wireguard/${SERVER_WG_NIC}.conf")
-
 		if [[ ${IPV4_EXISTS} == '1' ]]; then
 			echo ""
 			echo "A client with the specified IPv4 was already created, please choose another IPv4."
 			echo ""
 		fi
 	done
-
 	BASE_IP=$(echo "$SERVER_WG_IPV6" | awk -F '::' '{ print $1 }')
 	until [[ ${IPV6_EXISTS} == '0' ]]; do
 		read -rp "Client's WireGuard IPv6: ${BASE_IP}::" -e -i "${DOT_IP}" DOT_IP
 		CLIENT_WG_IPV6="${BASE_IP}::${DOT_IP}"
 		IPV6_EXISTS=$(grep -c "${CLIENT_WG_IPV6}/64" "/etc/wireguard/${SERVER_WG_NIC}.conf")
-
 		if [[ ${IPV6_EXISTS} == '1' ]]; then
 			echo ""
 			echo "A client with the specified IPv6 was already created, please choose another IPv6."
 			echo ""
 		fi
 	done
-
 	# Generate key pair for the client
 	CLIENT_PRIV_KEY=$(wg genkey)
 	CLIENT_PUB_KEY=$(echo "${CLIENT_PRIV_KEY}" | wg pubkey)
 	CLIENT_PRE_SHARED_KEY=$(wg genpsk)
-
 	# Home directory of the user, where the client configuration will be written
 	if [ -e "/home/${CLIENT_NAME}" ]; then
 		# if $1 is a user name
@@ -289,35 +264,27 @@ function newClient() {
 		# if not SUDO_USER, use /root
 		HOME_DIR="/root"
 	fi
-
 	# Create client file and add the server as a peer
 	echo "[Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
 Address = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128
 DNS = ${CLIENT_DNS_1},${CLIENT_DNS_2}
-
 [Peer]
 PublicKey = ${SERVER_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 Endpoint = ${ENDPOINT}
 AllowedIPs = 0.0.0.0/0,::/0" >>"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
-
 	# Add the client as a peer to the server
 	echo -e "\n### Client ${CLIENT_NAME}
 [Peer]
 PublicKey = ${CLIENT_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128" >>"/etc/wireguard/${SERVER_WG_NIC}.conf"
-
 	wg syncconf "${SERVER_WG_NIC}" <(wg-quick strip "${SERVER_WG_NIC}")
-
 	echo -e "\nHere is your client config file as a QR Code:"
-
 	qrencode -t ansiutf8 -l L <"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
-
 	echo "It is also available in ${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 }
-
 function revokeClient() {
 	NUMBER_OF_CLIENTS=$(grep -c -E "^### Client" "/etc/wireguard/${SERVER_WG_NIC}.conf")
 	if [[ ${NUMBER_OF_CLIENTS} == '0' ]]; then
@@ -325,7 +292,6 @@ function revokeClient() {
 		echo "You have no existing clients!"
 		exit 1
 	fi
-
 	echo ""
 	echo "Select the existing client you want to revoke"
 	grep -E "^### Client" "/etc/wireguard/${SERVER_WG_NIC}.conf" | cut -d ' ' -f 3 | nl -s ') '
@@ -336,29 +302,22 @@ function revokeClient() {
 			read -rp "Select one client [1-${NUMBER_OF_CLIENTS}]: " CLIENT_NUMBER
 		fi
 	done
-
 	# match the selected number to a client name
 	CLIENT_NAME=$(grep -E "^### Client" "/etc/wireguard/${SERVER_WG_NIC}.conf" | cut -d ' ' -f 3 | sed -n "${CLIENT_NUMBER}"p)
-
 	# remove [Peer] block matching $CLIENT_NAME
 	sed -i "/^### Client ${CLIENT_NAME}\$/,/^$/d" "/etc/wireguard/${SERVER_WG_NIC}.conf"
-
 	# remove generated client file
 	rm -f "${HOME}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
-
 	# restart wireguard to apply changes
 	wg syncconf "${SERVER_WG_NIC}" <(wg-quick strip "${SERVER_WG_NIC}")
 }
-
 function uninstallWg() {
 	echo ""
 	read -rp "Do you really want to remove WireGuard? [y/n]: " -e -i n REMOVE
 	if [[ $REMOVE == 'y' ]]; then
 		checkOS
-
 		systemctl stop "wg-quick@${SERVER_WG_NIC}"
 		systemctl disable "wg-quick@${SERVER_WG_NIC}"
-
 		if [[ ${OS} == 'ubuntu' ]]; then
 			apt-get autoremove --purge -y wireguard qrencode
 		elif [[ ${OS} == 'debian' ]]; then
@@ -376,17 +335,13 @@ function uninstallWg() {
 		elif [[ ${OS} == 'arch' ]]; then
 			pacman -Rs --noconfirm wireguard-tools qrencode
 		fi
-
 		rm -rf /etc/wireguard
 		rm -f /etc/sysctl.d/wg.conf
-
 		# Reload sysctl
 		sysctl --system
-
 		# Check if WireGuard is running
 		systemctl is-active --quiet "wg-quick@${SERVER_WG_NIC}"
 		WG_RUNNING=$?
-
 		if [[ ${WG_RUNNING} -eq 0 ]]; then
 			echo "WireGuard failed to uninstall properly."
 			exit 1
@@ -399,7 +354,6 @@ function uninstallWg() {
 		echo "Removal aborted!"
 	fi
 }
-
 function manageMenu() {
 	echo "Welcome to WireGuard-install!"
 	echo "The git repository is available at: https://github.com/angristan/wireguard-install"
@@ -429,10 +383,8 @@ function manageMenu() {
 		;;
 	esac
 }
-
 # Check for root, virt, OS...
 initialCheck
-
 # Check if WireGuard is already installed and load params
 if [[ -e /etc/wireguard/params ]]; then
 	source /etc/wireguard/params
